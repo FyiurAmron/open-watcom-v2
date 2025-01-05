@@ -89,13 +89,7 @@ Big1Flag        DB      0
 ENDIF
 
 ;
-VCPI_CR3        dd 0            ;CR3
-VCPI_pGDT       dd ?            ;Pointer to GDT descriptor.
-VCPI_pIDT       dd ?            ;Pointer to IDT descriptor.
-VCPI_LDT        dw 0            ;LDTR
-VCPI_TR         dw 0            ;TR
-VCPI_EIP        dd 0            ;CS:EIP client entry point.
-VCPI_CS         dw 0            ;/
+VCPISD	VCPI_SwitchData	<>
 ;
 VCPI_GDT        df 0            ;GDTR
 VCPI_IDT        df 0            ;IDTR
@@ -331,7 +325,7 @@ rv1_NoALIASMove:
         mov     eax,PageDirLinear+4
         mov     PageDirLinear,eax
         mov     eax,PageDirLinear+8
-        mov     VCPI_CR3,eax
+        mov     VCPISD.SD_CR3,eax
         call    CR3Flush
 ;
 ;Release VCPI memory.
@@ -402,7 +396,7 @@ rv1_pl0:
         mov     ax,MainDS
         mov     ds,ax
         assume ds:_cwMain
-        cmp     ProtectedType,1 ;VCPI?
+        cmp     ProtectedType,PTVCPI
         mov     ax,KernalDS
         mov     ds,ax
         assume ds:_cwRaw
@@ -617,7 +611,7 @@ CR3Flush        proc    near
         call    RawPL3toPL0
         ;
 ;       mov     eax,cr3
-        mov     eax,VCPI_CR3
+        mov     eax,VCPISD.SD_CR3
         mov     cr3,eax         ;flush page cache.
         ;
         mov     edx,d[rv10_StackAdd]
@@ -774,7 +768,7 @@ VCPIRelExtended proc far
         mov     ax,MainCS
         mov     ds,ax
         assume ds:_cwMain
-        cmp     ProtectedType,1
+        cmp     ProtectedType,PTVCPI
         assume ds:_cwRaw
         pop     ds
         jnz     rv12_9
@@ -1033,7 +1027,7 @@ Int15Rel        proc    far
         mov     ax,MainDS
         mov     ds,ax
         assume ds:_cwMain
-        cmp     ProtectedType,1 ;VCPI?
+        cmp     ProtectedType,PTVCPI
         assume ds:_cwRaw
         pop     ds
         jnc     rv15_9
@@ -1106,7 +1100,7 @@ RawReal2Prot    proc    near
         mov     CR3Sav,eax
         mov     eax,cr0
         mov     CR0Sav,eax
-        mov     eax,VCPI_CR3            ;PageDirLinear
+        mov     eax,VCPISD.SD_CR3            ;PageDirLinear
         mov     cr3,eax         ;set page dir address.
 
 ; MED 10/15/96
@@ -1232,13 +1226,13 @@ VCPIReal2Prot   proc    near
         pop     w[rv18_Return]
         mov     d[rv18_ReturnStack],edx
         mov     w[rv18_ReturnStack+4],cx
-        mov     VCPI_CS,KernalCS0
-        mov     VCPI_EIP,offset rv18_Resume486
+        mov     VCPISD.SD_CS,KernalCS0
+        mov     VCPISD.SD_EIP,offset rv18_Resume486
         mov     ax,0de0ch
         mov     si,seg _cwRaw
         movzx   esi,si
         shl     esi,4
-        add     esi,offset VCPI_CR3
+        add     esi,offset VCPISD
         int     67h
         ;
 rv18_Resume486:
@@ -2473,7 +2467,7 @@ A20Handler      proc    far
         mov     ax,MainDS
         mov     ds,ax
         assume ds:_cwMain
-        cmp     ProtectedType,0
+        cmp     ProtectedType,PTRAW
         assume ds:_cwRaw
         pop     ax
         pop     ds
@@ -4508,7 +4502,7 @@ GetVCPIPage     proc    near
         mov     ax,MainDS
         mov     ds,ax
         assume ds:_cwMain
-        cmp     ProtectedType,1 ;VCPI?
+        cmp     ProtectedType,PTVCPI
         assume ds:_cwDPMIEMU
         jnz     rv52_9
 
@@ -4574,7 +4568,7 @@ GetVCPIPages    proc    near
         mov     ax,MainDS
         mov     ds,ax
         assume ds:_cwMain
-        cmp     ProtectedType,1 ;VCPI?
+        cmp     ProtectedType,PTVCPI
         assume ds:_cwDPMIEMU
         jnz     rv53_9
         ;
@@ -4823,7 +4817,7 @@ GetXMSPages     proc    near
         assume ds:_cwMain
 
 ; MED, 11/11/99
-;       cmp     ProtectedType,1 ;VCPI?
+;       cmp     ProtectedType,PTVCPI
         cmp     VCPIHasNoMem,0  ; see if VCPI provided no memory, bail if it did
 
         assume ds:_cwRaw
@@ -5315,7 +5309,7 @@ GetInt15Pages   proc    near
         mov     ax,MainDS
         mov     ds,ax
         assume ds:_cwMain
-        cmp     ProtectedType,1 ;VCPI?
+        cmp     ProtectedType,PTVCPI
         assume ds:_cwRaw
         pop     ds
         jnc     rv57_9

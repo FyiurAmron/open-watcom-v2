@@ -449,3 +449,13 @@ LE_Reserved             db 20 dup (?) ;reserved.
 LE_DeviceID             dw ?    ;device ID (Windows VxD only).
 LE_DDK          dw ?    ;DDK version number.
 LE_Header               ends
+
+VCPI_SwitchData struc
+SD_CR3        dd 0            ;CR3
+SD_pGDT       dd ?            ;Pointer to GDT descriptor.
+SD_pIDT       dd ?            ;Pointer to IDT descriptor.
+SD_LDT        dw 0            ;LDTR
+SD_TR         dw 0            ;TR
+SD_EIP        dd 0            ;EIP client entry point.
+SD_CS         dw 0            ;CS client entry point.
+VCPI_SwitchData ends

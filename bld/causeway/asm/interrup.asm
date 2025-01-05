@@ -5,6 +5,38 @@
 
 ;-------------------------------------------------------------------------------
 
+;*******************************************************************************
+; Exception/Interrupt handler stack frames
+;*******************************************************************************
+IFRAME struct
+    i_eip       dd 0
+    i_cs        dw 0,0
+    i_eflags    dd 0
+    i_esp       dd 0
+    i_ss        dw 0,0
+IFRAME ends
+
+HFRAME struct
+    h_eax       dd ?
+    h_ds        dw ?,?
+    h_retaddr   dd 0
+    IFRAME h_iret <0>
+HFRAME ends
+
+HFRAMEX struct
+    h_eax       dd ?
+    h_ds        dw ?,?
+    h_retaddr   dd 0
+    h_errcode   dd 0
+    IFRAME h_iret <0>
+HFRAMEX ends
+
+HFRAME0 struct
+    h_eax       dd ?
+    h_ds        dw ?,?
+    IFRAME h_iret <0>
+HFRAME0 ends
+
 ;
 DpmiEmuSystemFlags dd 0
 ;
@@ -781,14 +813,15 @@ IntHandler      proc    near
         mov     ax,DpmiEmuDS            ;make our data addresable.
         mov     ds,ax           ;/
         movzx   esp,sp          ;our stack never >64k.
-        mov     eax,[esp+(4+4)] ;get return address.
+        mov     eax,[esp+HFRAMEX.h_retaddr] ;get return address.
         sub     eax,offset InterruptHandler
         shr     eax,3           ;convert it to an interrupt number.
         mov     ExceptionIndex,eax      ;/
 ;
 ;Check if this is an exception or interrupt (any error code)
 ;
-        cmp     esp,tPL0StackSize-4-((4+4)+(4)+(4)+(4+4+4)+(4+4))
+        cmp     esp,tPL0StackSize-4-(sizeof HFRAMEX)
+        ;                           (4+4)+(4)+(4)+(4+4+4)+(4+4)
         ;                            |    |   |     |      |
         ; EAX:DS --------------------/    |   |     |      |
         ;                                 |   |     |      |
@@ -801,7 +834,7 @@ IntHandler      proc    near
         ; ESP:SS ------------------------------------------/
         ;
         jnz     inter14_NoCode
-        and     w[esp+(4+4)+(4)+(4)+(4+4)],0011111111010101b
+        and     w[esp+HFRAMEX.h_flags],0011111111010101b
 
 ; MED 12/02/95
 ; check if Exception Index is 0dh
@@ -822,11 +855,11 @@ IntHandler      proc    near
         cmp     eax,0dh
         jne     mednoem                         ; not a GPF
 
-        mov     ax,ss:[esp+(4+4)+(4)+(4+4)+4]   ; ax==original CS
+        mov     ax,ss:[esp+4+HFRAMEX.h_cs]   ; ax==original CS
 ;       verr    ax                              ; check for looping lockup invalid value
 ;       jnz     mednoem
         mov     ds,ax
-        mov     eax,ss:[esp+(4+4)+(4)+(4)+4]    ; eax==original EIP
+        mov     eax,ss:[esp+4+HFRAMEX.h_eip]    ; eax==original EIP
 
         cmp     BYTE PTR ds:[eax],0fh           ; first opcode byte
         jne     mednoem                         ; no match
@@ -852,7 +885,7 @@ med4b:
         jne     med5b
         mov     eax,cr4
 medemu3eax:
-        mov     ss:[esp+4],eax                  ; update original eax with cr4 value
+        mov     ss:[esp+4+HFRAMEX.h_eax],eax                  ; update original eax with cr4 value
         jmp     medemu3
 med5b:
         cmp     BYTE PTR ds:[eax+2],0e3h        ; mov ebx,cr4
@@ -865,19 +898,19 @@ med6b:
         jne     med9b                           ; no match
         cmp     BYTE PTR ds:[eax+2],0c0h        ; move cr0,eax
         jne     med7b                           ; no match
-        mov     eax,ss:[esp+4]                  ; get original eax value
+        mov     eax,ss:[esp+4+HFRAMEX.h_eax]                  ; get original eax value
         mov     cr0,eax                         ; update cr0 value with original eax
         jmp     medemu3
 med7b:
         cmp     BYTE PTR ds:[eax+2],0d8h        ; move cr3,eax
         jne     med8b                           ; no match
-        mov     eax,ss:[esp+4]                  ; get original eax value
+        mov     eax,ss:[esp+4+HFRAMEX.h_eax]                  ; get original eax value
         mov     cr3,eax                         ; update cr3 value with original eax
         jmp     medemu3
 med8b:
         cmp     BYTE PTR ds:[eax+2],0e0h        ; move cr4,eax
         jne     mednoem                         ; no match
-        mov     eax,ss:[esp+4]                  ; get original eax value
+        mov     eax,ss:[esp+4+HFRAMEX.h_eax]                  ; get original eax value
         mov     cr4,eax                         ; update cr4 value with original eax
 medemu3:
         mov     eax,3
@@ -891,22 +924,22 @@ med9b:
 med10b:
         cmp     BYTE PTR ds:[eax+1],30h         ; WRMSR
         jne     med11b
-        mov     eax,ss:[esp+4]                  ; get original eax value
+        mov     eax,ss:[esp+4+HFRAMEX.h_eax]                  ; get original eax value
         wrmsr
         jmp     medemu2
 med11b:
         cmp     BYTE PTR ds:[eax+1],32h         ; RDMSR
         jne     mednoem
         rdmsr
-        mov     ss:[esp+4],eax                  ; update original eax value
+        mov     ss:[esp+4+HFRAMEX.h_eax],eax                  ; update original eax value
 
 .386p
 
 medemu2:
         mov     eax,2
 medemu:
-        add     ss:[esp+(4+4)+(4)+(4)+4],eax    ; adjust EIP past emulated instruction
         pop     ds
+        add     ss:[esp+HFRAMEX.h_eip],eax      ; adjust EIP past emulated instruction
         pop     eax
         pop     ds
         add     esp,8                           ; flush return address and error code off stack
@@ -916,45 +949,45 @@ medemu:
 mednoem:
         pop     ds
 
-        mov     eax,[esp+(4+4)+(4)]             ;get error code.
+        mov     eax,[esp+HFRAMEX.h_error]       ;get error code.
         mov     ExceptionCode,eax               ;/
-        mov     eax,[esp+(4+4)+(4)+(4)+(4+4)]   ;Get flags.
-        or      eax,65536
+        mov     eax,[esp+HFRAMEX.h_flags]       ;Get flags.
+        or      eax,1 shl 16			; set Error Code
         mov     ExceptionFlags,eax              ;Let dispatch know its an exception.
         mov     eax,cr2                         ;Grab this now to save more PL
         mov     ExceptionCR2,eax                ;switches for page faults.
         pop     eax
         pop     ds
-        add     esp,4                           ;skip error code.
+        add     esp,8                           ;skip return address and error code.
         jmp     inter14_SortedCode2
 inter14_NoCode:
-        and     w[esp+(4+4)+(4)+(4+4)],0011111111010101b
-        mov     eax,[esp+(4+4)+(4)+(4+4)]       ;Get flags.
-        and     eax,not 65536
+        and     w[esp+HFRAME.h_flags],0011111111010101b ; 1 shl 15, 1 shl 14, 1 shl 5, 1 shl 3, 1 shl 1
+        mov     eax,[esp+HFRAME.h_flags]       ;Get flags.
+        and     eax,not (1 shl 16)		; set no Error code
         mov     ExceptionFlags,eax
-        cmp ExceptionIndex,0
+        cmp     ExceptionIndex,0
         jz inter14_ForceException
-        cmp     ExceptionIndex,1        ;int 1
+        cmp     ExceptionIndex,1                ;int 1
         jnz     inter14_SortedCode
 inter14_ForceException:
-;       or      ExceptionFlags,65535    ;force an exception.
-        or      ExceptionFlags,65536    ;force an exception.
+;       or      ExceptionFlags,65535            ;force an exception.
+        or      ExceptionFlags,1 shl 16         ; set Error Code
 
 inter14_SortedCode:
         pop     eax
         pop     ds
-inter14_SortedCode2:
         add     esp,4           ;skip return address.
+inter14_SortedCode2:
         ;
         ;Check which stack we should switch back to.
         ;
         push    ds
         push    eax
-        cmp     w[esp+(4+4)+(4+4+4)+(4)],KernalSS
+        cmp     w[esp-4+HFRAME.h_ss],KernalSS
         jz      KernalStack             ;Already on system stack?
         mov     ax,DpmiEmuDS
         mov     ds,ax
-        test    ExceptionFlags,65536    ;exception?
+        test    ExceptionFlags,1 shl 16 ; test Error Code
         jnz     KernalStack
         ;
         push    ebx
@@ -998,37 +1031,37 @@ IntStack        proc    near
         ;
         test    BYTE PTR cs:DpmiEmuSystemFlags,1
         jz      inter15_iUse32
-        mov     eax,[esp+(4+4+4)+(4+4+4+4)]
+        mov     eax,[esp+HFRAME.h_ss]
         sub     ebx,2
         mov     [ebx],ax                ;SS
-        mov     eax,[esp+(4+4+4)+(4+4+4)]
+        mov     eax,[esp+HFRAME.h_esp]
         sub     ebx,2
         mov     [ebx],ax                ;ESP
-        mov     eax,[esp+(4+4+4)+(4+4)]
+        mov     eax,[esp+HFRAME.h_flags]
         sub     ebx,2
         mov     [ebx],ax                ;EFlags
-        mov     eax,[esp+(4+4+4)+(4)]
+        mov     eax,[esp+HFRAME.h_cs]
         sub     ebx,2
         mov     [ebx],ax                ;CS
-        mov     eax,[esp+(4+4+4)+(0)]
+        mov     eax,[esp+HFRAME.h_eip]
         sub     ebx,2
         mov     [ebx],ax                ;EIP
         jmp     inter15_iUse0
         ;
 inter15_iUse32:
-        mov     eax,[esp+(4+4+4)+(4+4+4+4)]
+        mov     eax,[esp+HFRAME.h_ss]
         sub     ebx,4
         mov     [ebx],eax               ;SS
-        mov     eax,[esp+(4+4+4)+(4+4+4)]
+        mov     eax,[esp+HFRAME.h_esp]
         sub     ebx,4
         mov     [ebx],eax               ;ESP
-        mov     eax,[esp+(4+4+4)+(4+4)]
+        mov     eax,[esp+HFRAME.h_flags]
         sub     ebx,4
         mov     [ebx],eax               ;EFlags
-        mov     eax,[esp+(4+4+4)+(4)]
+        mov     eax,[esp+HFRAME.h_cs]
         sub     ebx,4
         mov     [ebx],eax               ;CS
-        mov     eax,[esp+(4+4+4)+(0)]
+        mov     eax,[esp+HFRAME.h_eip]
         sub     ebx,4
         mov     [ebx],eax               ;EIP
         ;
@@ -1036,17 +1069,17 @@ inter15_iUse0:
         ;Put new details into current stack.
         ;
         mov     eax,offset inter15_Int
-        mov     [esp+(4+4+4)+(0)],eax   ;EIP
+        mov     [esp+HFRAME.h_eip],eax   ;EIP
         xor     eax,eax
         mov     ax,DpmiEmuCS
-        mov     [esp+(4+4+4)+(4)],eax   ;CS
+        mov     [esp+HFRAME.h_cs],eax   ;CS
         pushfd
         pop     eax
-        mov     [esp+(4+4+4)+(4+4)],eax ;EFlags
-        mov     [esp+(4+4+4)+(4+4+4)],ebx       ;ESP
+        mov     [esp+HFRAME.h_flags],eax ;EFlags
+        mov     [esp+HFRAME.h_esp],ebx       ;ESP
         xor     eax,eax
         mov     ax,KernalSS
-        mov     [esp+(4+4+4)+(4+4+4+4)],eax ;SS
+        mov     [esp+HFRAME.h_ss],eax ;SS
         pop     ds
         pop     ebx
         pop     eax
@@ -1229,13 +1262,13 @@ IntDispatch     proc    near
         push    ds
         mov     ax,DpmiEmuDS
         mov     ds,ax
-        and     w[ExceptionFlags],1111110011111111b
+        and     w[ExceptionFlags],1111110011111111b ; not ((1 shl 8) | (1 shl 9)) Trap flag | Interrupt flag
         mov     esi,ExceptionIndex      ;Get the exception number.
         add     esi,esi         ;*2
         mov     eax,esi
         add     esi,esi         ;*4
         add     esi,eax         ;*6
-        test    ExceptionFlags,65536
+        test    ExceptionFlags,1 shl 16		; test Resume flag
         jnz     inter17_Excep
         ;
         ;Dispatch normal interrupt.

@@ -60,8 +60,17 @@ VersionMinor    db '05'
 ;
 RealPSPSegment  dw ?            ;Real mode PSP segment.
 RealEnvSegment  dw ?            ;Real mode environment segment.
-ProtectedFlags  dw 0            ;Bit significant, 0-DPMI,1-VCPI,2-RAW.
-ProtectedType   dw 0            ;0-RAW,1-VCPI,2-DPMI.
+; ProtectedFlags values Bit significant, 0-DPMI,1-VCPI,2-RAW.
+PFNONE	equ	0
+PFDPMI	equ	1
+PFVCPI	equ	2
+PFRAW	equ	4
+ProtectedFlags  dw PFNONE
+; ProtectedType values  0-RAW,1-VCPI,2-DPMI.
+PTRAW	equ	0
+PTVCPI	equ	1
+PTDPMI	equ	2
+ProtectedType   dw PTRAW
 ProtectedForce  db 0
 DOSVersion      dw 0
 SystemFlags     dd 0
@@ -270,7 +279,7 @@ cwOpen  proc    near
         mov     ax,RealPSPSegment
         mov     es:RealRegsStruc.Real_ES[edi],ax
         mov     bx,_cwDPMIEMU
-        cmp     ProtectedType,2
+        cmp     ProtectedType,PTDPMI
         jnz     cw1_KeepRaw
         mov     bx,_cwRaw
 cw1_KeepRaw:
@@ -533,7 +542,7 @@ cw2_Use0:
         assume es:nothing
         ;
 cw2_noAPI:
-        cmp     ProtectedType,2 ;DPMI?
+        cmp     ProtectedType,PTDPMI    ;DPMI?
         jz      cw2_DPMI
 
 ;
@@ -748,7 +757,7 @@ _cwStack        ends
 
 ;=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 ;
-;The initialiseation code seg. Takes care of things like checking for the right
+;The initialisation code seg. Takes care of things like checking for the right
 ;processor and determining how we're going to get into protected mode.
 ;
 _cwInit segment para public 'init code' use16
@@ -762,7 +771,7 @@ dpmiSelBuffer   db 8 dup (0)
 ;
 apiDataSegi     dw 0
 IProtectedMode  db 0
-IProtectedType  dw 0
+IProtectedType  dw PTRAW
 DPMISwitch      dw ?,?
 dpmiSelBase     dd 0
 dpmiCodeSel     dw ?
@@ -952,7 +961,7 @@ chk386:
 ;
         call    GetProtectedType
         mov     cs:IErrorNumber,3
-        cmp     ProtectedFlags,0        ;Any types available?
+        cmp     ProtectedFlags,PFNONE   ;Any types available?
         jz      InitError
 ;
 ;Get CAUSEWAY environment variable settings.
@@ -971,7 +980,7 @@ chk386:
 ;
 ;now see about type specific initialisations.
 ;
-        cmp     ProtectedType,2 ;DPMI initialiseation?
+        cmp     ProtectedType,PTDPMI    ;DPMI initialisation?
         jz      cw5_InitDPMI
 ;
 ;Useing either RAW or VCPI so do the stuff that's common to both for now.
@@ -1228,7 +1237,7 @@ cw5_GotSeg:
         movzx   eax,PageDirReal
         shl     eax,4
         mov     PageDirLinear,eax
-        mov     VCPI_CR3,eax
+        mov     VCPISD.SD_CR3,eax
         movzx   eax,PageAliasReal
         shl     eax,4
         mov     PageAliasLinear,eax
@@ -1712,7 +1721,7 @@ END COMMENT !
         mov     ax,_cwMain
         mov     ds,ax
         assume ds:_cwMain
-        cmp     ProtectedType,1         ;VCPI?
+        cmp     ProtectedType,PTVCPI    ;VCPI?
         assume ds:_cwRaw
         pop     ds
         jz      cw5_VCPI
@@ -1757,7 +1766,7 @@ cw5_RAW:
         cli                             ;Don't want interupts interfering.
         lgdt    GDTVal                  ;Setup GDT &
         lidt    f[IDTVal]               ;IDT.
-        mov     eax,VCPI_CR3
+        mov     eax,VCPISD.SD_CR3
         mov     cr3,eax                 ;set page dir address.
         mov     eax,cr0                 ;Get machine status &
         or      eax,080000001h          ;set PM+PG bits.
@@ -1824,7 +1833,7 @@ cw5_VCPI:
         shl     edi,2                   ;*4 bytes per entry.
         mov     eax,es:[di]             ;get physical address.
         and     eax,0FFFFFFFFh-4095     ;clear status bits.
-        mov     VCPI_CR3,eax            ;set VCPI CR3 value as well.
+        mov     VCPISD.SD_CR3,eax     ;set VCPI CR3 value as well.
         mov     es,KernalTSSReal
         xor     di,di
         mov     es:[di].TSSFields.tCR3,eax  ;set CR3 in TSS as well.
@@ -1841,26 +1850,26 @@ cw5_VCPI:
         mov     di,1023*4
         mov     es:[di],eax             ;setup in last page dir entry.
         ;
-        mov     VCPI_LDT,KernalLDT
-        mov     VCPI_EIP,offset cw5_InProt
-        mov     VCPI_TR,KernalTS        ;Get value for task register.
-        mov     VCPI_CS,InitCS0
+        mov     VCPISD.SD_LDT,KernalLDT
+        mov     VCPISD.SD_EIP,offset cw5_InProt
+        mov     VCPISD.SD_TR,KernalTS        ;Get value for task register.
+        mov     VCPISD.SD_CS,InitCS0
         xor     eax,eax
         mov     ax,seg _cwRaw
         shl     eax,4
         add     eax,offset GDTVal
-        mov     VCPI_pGDT,eax
+        mov     VCPISD.SD_pGDT,eax
         xor     eax,eax
         mov     ax,seg _cwRaw
         shl     eax,4
         add     eax,offset IDTVal
-        mov     VCPI_pIDT,eax
+        mov     VCPISD.SD_pIDT,eax
         cli
         mov     ax,0de0ch
         mov     si,seg _cwRaw
         movzx   esi,si
         shl     esi,4
-        add     esi,offset VCPI_CR3
+        add     esi,offset VCPISD
         int     67h
         ;
         mov     ax,_cwStack
@@ -2263,10 +2272,10 @@ END COMMENT !
         mov     eax,LinearEntry
         shl     eax,12                  ;get linear address.
         mov     PageDirLinear,eax       ;set new value.
-        mov     eax,VCPI_CR3
+        mov     eax,VCPISD.SD_CR3
         mov     PageDirLinear+8,eax     ;store old physical address.
         mov     eax,LinearEntry+8
-        mov     VCPI_CR3,eax            ;set new physical address.
+        mov     VCPISD.SD_CR3,eax            ;set new physical address.
         movzx   edi,KernalTSSReal
         shl     edi,4
         mov     es:[edi].TSSFields.tCR3,eax ;set CR3 in TSS as well.
@@ -3726,7 +3735,7 @@ cw6_Use0:
         ;
 cw6_noAPI:
         assume ds:nothing
-        cmp     cs:IProtectedType,2     ;DPMI?
+        cmp     cs:IProtectedType,PTDPMI ;DPMI?
         assume ds:_cwInit
         jz      cw6_DPMI
 ;
@@ -4681,13 +4690,13 @@ GetProtectedType proc near
 ;
         call    ChkDPMI                 ;32 bit DPMI server present?
         jc      cw13_0
-        or      ProtectedFlags,1
+        or      ProtectedFlags,PFDPMI
 cw13_0: call    ChkVCPI                 ;VCPI >= v1.0 present?
         jc      cw13_1
-        or      ProtectedFlags,2
+        or      ProtectedFlags,PFVCPI
 cw13_1: call    ChkRAW                  ;Running in real mode?
         jc      cw13_2
-        or      ProtectedFlags,4
+        or      ProtectedFlags,PFRAW
 cw13_2: ret
 GetProtectedType endp
 
@@ -4696,19 +4705,19 @@ GetProtectedType endp
 SetProtectedType proc near
         cmp     ProtectedForce,0
         jz      cw14_NoDPMIForce
-        test    BYTE PTR ProtectedFlags,1
+        test    BYTE PTR ProtectedFlags,PFDPMI
         jnz     cw14_2
         ;
 cw14_NoDPMIForce:
-        test    BYTE PTR ProtectedFlags,4
+        test    BYTE PTR ProtectedFlags,PFRAW
         jz      cw14_1
-        mov     ProtectedType,0         ;Use real mode.
+        mov     ProtectedType,PTRAW     ;Use real mode.
         jmp     cw14_3
-cw14_1: test    BYTE PTR ProtectedFlags,2
+cw14_1: test    BYTE PTR ProtectedFlags,PFVCPI
         jz      cw14_2
-        mov     ProtectedType,1         ;Use VCPI.
+        mov     ProtectedType,PTVCPI    ;Use VCPI.
         jmp     cw14_3
-cw14_2: mov     ProtectedType,2         ;Use DPMI.
+cw14_2: mov     ProtectedType,PTDPMI    ;Use DPMI.
 cw14_3: push    es
         mov     ax,_cwInit
         mov     es,ax
